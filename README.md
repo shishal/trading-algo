@@ -24,6 +24,7 @@ pip install uv
 This uses `uv` for dependency management. Install dependencies:
 ```bash
 uv sync
+source .venv/bin/activate
 ```
 
 Or if you prefer using pip:

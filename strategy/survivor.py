@@ -3,6 +3,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import yaml
+import threading
+import sys
 from logger import logger
 
 class SurvivorStrategy:
@@ -1002,8 +1004,26 @@ PARAMETER GROUPS:
             print("="*80)
             
             # Ask for user confirmation
+            
+            user_response = {'value': None}
+
+            def get_input():
+                try:
+                    user_response['value'] = input("\nDo you want to proceed with this configuration? Auto approved in 30 sec. (yes/no): ").lower().strip()
+                except Exception:
+                    user_response['value'] = None
+
+            input_thread = threading.Thread(target=get_input)
+            input_thread.daemon = True
+            input_thread.start()
+            input_thread.join(timeout=30)
+
+            response = user_response['value']
+            if response is None:
+                print("\nNo input received in 30 seconds. Proceeding with default: yes")
+                print("\n✅ Proceeding with current configuration...")
+                return True
             while True:
-                response = input("\nDo you want to proceed with this configuration? (yes/no): ").lower().strip()
                 if response in ['yes', 'y']:
                     print("\n✅ Proceeding with current configuration...")
                     return True
@@ -1012,7 +1032,7 @@ PARAMETER GROUPS:
                     print("Please update your configuration and try again.")
                     return False
                 else:
-                    print("Please enter 'yes' or 'no'.")
+                    response = input("Please enter 'yes' or 'no': ").lower().strip()
         
         # If all values have been updated, proceed without confirmation
         print("\n" + "="*80)

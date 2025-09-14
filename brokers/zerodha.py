@@ -10,7 +10,8 @@ from brokers.base import BrokerBase
 from kiteconnect import KiteConnect, KiteTicker
 import pandas as pd
 from threading import Thread
-
+from urllib.parse import urlparse, parse_qs
+import re
 from logger import logger
 
 
@@ -38,7 +39,9 @@ class ZerodhaBroker(BrokerBase):
         if self.without_totp:
             kite = KiteConnect(api_key=os.getenv('BROKER_API_KEY'))
             print(f"Please Login to Zerodha and get the request token from the URL.\n {kite.login_url()} \nThen paste the request token here:")
-            request_token = input("Request Token: ")
+            request_token = self.get_request_token(api_key,totp_secret, broker_id, password)
+            if not request_token:
+                raise Exception("Failed to obtain request_token automatically via broker_login.")
             resp = kite.generate_session(request_token, os.environ['BROKER_API_SECRET'])
             return kite, resp
         
@@ -254,4 +257,58 @@ class ZerodhaBroker(BrokerBase):
         self.kite_ws.on_reconnect = self.on_reconnect
         self.kite_ws.on_noreconnect = self.on_noreconnect
         self.kite_ws.connect(threaded=True)
+    
+    def get_request_token(self,api_key,totp_key,user_id, password):
+        session = requests.Session()
+        login_payload = {
+            "user_id": user_id,
+            "password": password,
+        }
+        response = session.post("https://kite.zerodha.com/api/login", login_payload)
+        login_response = response.json()
+        print("login_response: ", login_response)
+
+        if login_response['status'] != 'success':
+            print('Broker Login : Login failed with message : %s', login_response['message'])
+            return None
+
+        totp = pyotp.TOTP(totp_key).now()
+        twofa_payload = {
+            "user_id": user_id,
+            "request_id": login_response["data"]["request_id"],
+            "twofa_value": totp,
+            "twofa_type": "totp",
+            "skip_session": True,
+        }
+        response = session.post("https://kite.zerodha.com/api/twofa", twofa_payload)
+        print("totp_response: "+response.text)
+        totp_response = response.json()
+
+        if totp_response['status'] != 'success':
+            print('Broker Login : Login failed with message : %s', totp_response['message'])
+            return None
+
+        kite = KiteConnect(api_key=api_key)
+        print("kite.login_url(): ",kite.login_url())
+
+        try:
+            # Extracting query parameters from redirect URL
+            response = session.get(kite.login_url())
+            print("response.url: ",response.url)
+            parse_result = urlparse(response.url)
+            query_parms = parse_qs(parse_result.query)
+            print("query_parms: ",query_parms)
+        except Exception as e:
+            # Extracting query parameters from error message in case of error
+            pattern = r"request_token=[A-Za-z0-9]+"
+            # Extracting request token
+            query_parms = parse_qs(re.findall(pattern, e.__str__())[0])
+
+        try:
+            request_token = query_parms["request_token"][0]
+            print("request_token: ",request_token)
+            return request_token
+        except Exception as e:
+            print('Broker Login : Login failed. Check Credentials and try again')
+            return None
         
